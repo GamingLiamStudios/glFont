@@ -95,8 +95,10 @@ dependencies = [
 name = "glfont"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "chrono",
  "fixed",
+ "num-traits",
  "paste",
  "thiserror",
  "tracing",

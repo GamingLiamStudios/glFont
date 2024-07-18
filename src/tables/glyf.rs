@@ -1,19 +1,22 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
+use std::marker::PhantomData;
+
 use super::Table;
-use crate::io::CoreVec;
+use crate::io;
 
-pub type ParsedType<A> = CoreVec<Type<A>, A>;
+pub type ParsedType<A> = io::CoreVec<Type<A>, A>;
 
+#[derive(Debug)]
 pub struct Type<A: core::alloc::Allocator> {
-    data: CoreVec<u8, A>,
+    _phantom: PhantomData<A>,
 }
 
-pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
+pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::CoreRead>(
     allocator: A,
     prev_tables: &[Table<A>],
-    data: CoreVec<u8, A>,
-) -> Result<CoreVec<Type<A>, A>, crate::Error<IoError>> {
+    reader: &R,
+) -> Result<io::CoreVec<Type<A>, A>, crate::Error<R::IoError>> {
     // Requires `maxp` + `loca` tables
     let Some(Table::Maxp(maxp)) = prev_tables.iter().find(|v| matches!(v, Table::Maxp(_))) else {
         return Err(crate::Error::MissingTable {
@@ -36,8 +39,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         super::maxp::Type::_Phantom(_) => unreachable!(),
     };
 
-    let mut glyphs = CoreVec::with_capacity_in(num_glyphs as usize, allocator);
-    glyphs.push(Type { data });
+    let mut glyphs = io::CoreVec::with_capacity_in(num_glyphs as usize, allocator);
+    //glyphs.push(Type {  });
 
     Ok(glyphs)
 }

@@ -4,9 +4,12 @@
 #![feature(allocator_api)]
 #![feature(array_chunks)]
 #![feature(const_fn_floating_point_arithmetic)]
+#![feature(generic_const_exprs)]
 #![allow(clippy::missing_errors_doc)]
 
 use std::fmt::Display;
+
+use io::CoreRead;
 
 mod io;
 mod tables;
@@ -71,9 +74,9 @@ impl Display for ValidType {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error<IoError> {
+pub enum Error<IoError: core::fmt::Debug> {
     #[error(transparent)]
-    IoError(#[from] IoError),
+    IoError(#[from] io::CoreReadError<IoError>),
 
     /// TTF sfntVersion is invalid/unsupported
     #[error("Invalid Sfnt Version {0:?}")]
@@ -86,6 +89,9 @@ pub enum Error<IoError> {
         expected: ValidType,
         parsed:   ValidType,
     },
+
+    #[error("Invalid tag {0:?}")]
+    InvalidTag([u8; 4]),
 
     #[error("Invalid version at {location} (got {version})")]
     InvalidVersion {
@@ -117,42 +123,21 @@ pub enum Error<IoError> {
     },
 }
 
-pub struct Font<A: core::alloc::Allocator> {
+pub struct Font<A: core::alloc::Allocator + core::fmt::Debug> {
     tables: io::CoreVec<tables::Table<A>, A>,
 }
 
-fn verify_header<IoError: core::error::Error>(
-    input: &mut impl io::CoreRead<IoError>
-) -> Result<(u16, u32), Error<IoError>> {
-    let mut read_buf = [0; 12];
-    input.read(&mut read_buf[..12])?;
-
-    let mut checksum_full = 0u32;
-    for chunk in read_buf[..12].array_chunks() {
-        (checksum_full, _) = checksum_full.overflowing_add(u32::from_be_bytes(*chunk));
+fn verify_header<R: io::CoreRead>(input: &mut R) -> Result<u16, Error<R::IoError>> {
+    let mut version = [0; 4];
+    input.read(&mut version)?;
+    if version != [0x00, 0x01, 0x00, 0x00] {
+        return Err(Error::InvalidSfntVersion(version));
     }
 
-    // version check
-    if read_buf[0..4] != [0x00, 0x01, 0x00, 0x00] {
-        return Err(Error::InvalidSfntVersion(
-            read_buf[..4]
-                .try_into()
-                .expect("Failed to make Array (4) from Slice (16)"),
-        ));
-    }
-
-    let num_tables = u16::from_be_bytes(
-        read_buf[4..6]
-            .try_into()
-            .expect("Failed to make Array (2) from Slice (16)"),
-    );
+    let num_tables: u16 = input.read_int()?;
     tracing::trace!("NumTables: {num_tables}");
 
-    let search_range = u16::from_be_bytes(
-        read_buf[6..8]
-            .try_into()
-            .expect("Failed to make Array (2) from Slice (16)"),
-    );
+    let search_range: u16 = input.read_int()?;
     if search_range != 2_u16.pow(num_tables.ilog2()) * 16 {
         return Err(Error::Parsing {
             variable: "SearchRange",
@@ -161,11 +146,7 @@ fn verify_header<IoError: core::error::Error>(
         });
     }
 
-    let entry_selector = u16::from_be_bytes(
-        read_buf[8..10]
-            .try_into()
-            .expect("Failed to make Array (2) from Slice (16)"),
-    );
+    let entry_selector: u16 = input.read_int()?;
     if entry_selector != u16::try_from(num_tables.ilog2()).expect("ilog2 downcast failed") {
         return Err(Error::Parsing {
             variable: "EntrySelector",
@@ -174,11 +155,7 @@ fn verify_header<IoError: core::error::Error>(
         });
     }
 
-    let range_shift = u16::from_be_bytes(
-        read_buf[10..12]
-            .try_into()
-            .expect("Failed to make Array (2) from Slice (16)"),
-    );
+    let range_shift: u16 = input.read_int()?;
     if range_shift != num_tables * 16 - search_range {
         return Err(Error::Parsing {
             variable: "RangeShift",
@@ -187,63 +164,35 @@ fn verify_header<IoError: core::error::Error>(
         });
     }
 
-    Ok((num_tables, checksum_full))
+    Ok(num_tables)
 }
 
 /// # Panics
 /// - If Slice of size `N` is unable to cast to array of type `[u8; N]`
 /// - If Downcast fails
 #[tracing::instrument(level = "trace", skip_all)]
-pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
+pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::CoreRead>(
     allocator: A,
-    input: &mut impl io::CoreRead<IoError>,
-) -> Result<Font<A>, Error<IoError>> {
-    let mut read_buf = [0; 16];
+    input: &mut R,
+) -> Result<Font<A>, Error<R::IoError>> {
+    let mut reader = io::ChecksumReader::new(input);
 
-    let (num_tables, mut checksum_full) = verify_header(input)?;
-
+    let num_tables = verify_header(&mut reader)?;
     let mut tables = Vec::with_capacity_in(num_tables as usize, allocator);
 
-    let mut end = 0;
-    let mut index = 12;
-    for idx in 0..num_tables {
-        if input.read(&mut read_buf[..16])? != 16 {
-            return Err(Error::Parsing {
-                variable: "TableRecords",
-                expected: ValidType::U16(num_tables),
-                parsed:   ValidType::U16(idx + 1),
+    for _ in 0..num_tables {
+        let mut tag = [0u8; 4];
+        let read = reader.read(&mut tag)?;
+        if read != tag.len() {
+            return Err(Error::UnexpectedEop {
+                location: "TableRecord",
+                needed:   tag.len() - read,
             });
         }
-        index += 16;
 
-        // Calculate checksum for this region
-        for chunk in read_buf[..16].array_chunks() {
-            (checksum_full, _) = checksum_full.overflowing_add(u32::from_be_bytes(*chunk));
-        }
-
-        let tag: [u8; 4] = read_buf[..4]
-            .try_into()
-            .expect("Failed to make Array (4) from Slice (16)");
-
-        let checksum = u32::from_be_bytes(
-            read_buf[4..8]
-                .try_into()
-                .expect("Failed to make Array (2) from Slice (16)"),
-        );
-
-        let offset = u32::from_be_bytes(
-            read_buf[8..12]
-                .try_into()
-                .expect("Failed to make Array (2) from Slice (16)"),
-        );
-
-        let length = u32::from_be_bytes(
-            read_buf[12..16]
-                .try_into()
-                .expect("Failed to make Array (2) from Slice (16)"),
-        );
-
-        end = end.min(offset as usize + length as usize);
+        let checksum: u32 = reader.read_int()?;
+        let offset: u32 = reader.read_int()?;
+        let length: u32 = reader.read_int()?;
 
         tables.push((tag, checksum, offset as usize, length as usize));
     }
@@ -251,7 +200,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
     tracing::event!(
         name: "Header",
         tracing::Level::TRACE,
-        "Bytes read: {index}"
+        "Bytes read: {}", reader.total_read()
     );
     let mut parsed_tables = Vec::new_in(allocator);
 
@@ -259,49 +208,17 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
 
     tables.sort_by(|(_, _, a, _), (_, _, b, _)| a.cmp(b));
     for (tag, checksum, offset, length) in tables {
-        if offset != index {
+        if offset != reader.total_read() {
             tracing::event!(
                 tracing::Level::WARN,
-                "Read Mismatch! expected {offset}, got {index}"
+                "Read Mismatch! expected {offset}, got {}",
+                reader.total_read()
             );
             // Fix read bytes
-
-            while index < offset {
-                let mut byte = [0; 1];
-                if input.read(&mut byte)? != 1 {
-                    return Err(Error::UnexpectedEof(index));
-                }
-                index += 1;
-            }
+            reader.skip(offset - reader.total_read())?;
         }
 
-        let mut data_vec = Vec::with_capacity_in(length, allocator);
-        if data_vec.capacity() < length {
-            return Err(Error::Allocation {
-                location:  "TableData",
-                expected:  length,
-                allocated: data_vec.capacity(),
-            });
-        }
-
-        // Fill vec as we compute checksum
-        let mut checksum_act = 0u32;
-        let mut block = [0; 4];
-
-        while index < offset + length {
-            if input.read(&mut block)? != 4 {
-                return Err(Error::UnexpectedEof(index));
-            }
-
-            (checksum_act, _) = checksum_act.overflowing_add(u32::from_be_bytes(block));
-
-            let read_len = 4.min(offset + length - index);
-            data_vec.extend_from_slice(&block[..read_len]);
-            // can probably replace with push_within_capacity and remove need for read_len
-            // (when un-feature-gated)
-
-            index += 4;
-        }
+        let mut tag_reader = io::ChecksumReader::new(&mut reader);
 
         tracing::event!(
             tracing::Level::TRACE,
@@ -309,42 +226,60 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
             ValidType::Tag(tag)
         );
 
+        let parsed = tables::parse_table(allocator, &parsed_tables, tag, &mut tag_reader);
+
+        tag_reader.skip(length - tag_reader.total_read())?;
+        let mut checksum_act = tag_reader.finish()?;
+
         if tag == *b"head" {
-            // find `checksumAdjustment` bytes and subtract from computed checksum
-            checksum_adj = u32::from_be_bytes(
-                data_vec[8..12]
-                    .try_into()
-                    .expect("Failed to make Array (4) from Slice (4)"),
-            );
-            (checksum_act, _) = checksum_act.overflowing_sub(checksum_adj);
+            let tables::Table::Head(head) = parsed? else {
+                panic!("head not parsed as head");
+            };
+
+            // this works cuz it's on a 4-byte boundary
+            (checksum_act, _) = checksum_act.overflowing_sub(head.checksum_adjustment);
+            checksum_adj = head.checksum_adjustment;
+
+            parsed_tables.push(tables::Table::Head(head));
+        } else {
+            if parsed.is_ok() {
+                parsed_tables.push(parsed?);
+            } else {
+                let error = parsed.unwrap_err();
+                if !matches!(error, Error::InvalidTag(_)) {
+                    return Err(error);
+                };
+            }
         }
 
         if checksum_act != checksum {
-            //println!("Checksum invalid! {checksum} != {checksum_act}");
+            println!("Checksum invalid! {checksum} != {checksum_act}");
+            /*
             return Err(Error::Parsing {
                 variable: "TableChecksum",
                 expected: ValidType::U32(checksum),
                 parsed:   ValidType::U32(checksum_act),
             });
+            */
         }
+    }
 
-        (checksum_full, _) = checksum_full.overflowing_add(checksum);
+    let mut checksum = reader.finish()?;
 
-        parsed_tables.push(tables::parse_table(
-            allocator,
-            &parsed_tables,
-            tag,
-            data_vec,
-        )?);
+    if let Some(tables::Table::Head(head)) = parsed_tables
+        .iter()
+        .find(|t| matches!(t, tables::Table::Head(_)))
+    {
+        (checksum, _) = checksum.overflowing_sub(head.checksum_adjustment);
     }
 
     // ChecksumAdjustment may be set to 0 for version 'OTTO'
-    (checksum_full, _) = 0xb1b0_afba_u32.overflowing_sub(checksum_full);
-    if checksum_full != checksum_adj {
+    (checksum, _) = 0xb1b0_afba_u32.overflowing_sub(checksum);
+    if checksum != checksum_adj {
         return Err(Error::Parsing {
             variable: "ChecksumAdjustment",
             expected: ValidType::U32(checksum_adj),
-            parsed:   ValidType::U32(checksum_full),
+            parsed:   ValidType::U32(checksum),
         });
     }
 

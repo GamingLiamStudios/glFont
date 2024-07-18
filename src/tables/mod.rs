@@ -1,6 +1,6 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
-use crate::io::CoreVec;
+use crate::io;
 
 macro_rules! create_table {
     {$($tag:ident),* $(,)*} => {
@@ -9,19 +9,19 @@ macro_rules! create_table {
                 mod [<$tag:lower>];
             )*
 
-            pub enum Table<A: core::alloc::Allocator> {
-                _Dummy(CoreVec<u8, A>),
+            #[derive(Debug)]
+            pub enum Table<A: core::alloc::Allocator + core::fmt::Debug> {
                 $(
                     [<$tag:camel>]([<$tag:lower>]::ParsedType<A>),
                 )*
             }
 
-            pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
+            pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate::io::CoreRead>(
                 allocator: A,
                 prev_tables: &[Table<A>],
                 tag: [u8; 4],
-                data: CoreVec<u8, A>,
-            ) -> Result<Table<A>, crate::Error<IoError>> {
+                reader: &mut R,
+            ) -> Result<Table<A>, crate::Error<R::IoError>> {
                 $(
                     const [<$tag:upper>]: [u8; stringify!([<$tag:lower>]).len()] = {
                         const BYTES: &[u8] = stringify!([<$tag:lower>]).as_bytes();
@@ -35,14 +35,14 @@ macro_rules! create_table {
                     };
                 )*
 
-                Ok(
+
                     match tag {
                         $(
-                            [<$tag:upper>] => Table::[<$tag:camel>]([<$tag:lower>]::parse_table(allocator, prev_tables, data)?),
+                            [<$tag:upper>] => Ok(Table::[<$tag:camel>]([<$tag:lower>]::parse_table(allocator, prev_tables, reader)?)),
                         )*
-                        _ => Table::_Dummy(data),
+                        _ => Err(crate::Error::InvalidTag(tag))
                     }
-                )
+
             }
         }
     };

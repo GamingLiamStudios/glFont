@@ -22,31 +22,25 @@ impl Style {
     const UNDERLINE: u16 = 1 << 2;
 }
 
+#[derive(Debug)]
 pub struct Type<A: core::alloc::Allocator> {
-    pub units_per_em:     u16,
-    pub smallest_px_size: u16,
-    pub style:            u16,
-    pub long_offset:      bool,
+    pub units_per_em:        u16,
+    pub smallest_px_size:    u16,
+    pub style:               u16,
+    pub long_offset:         bool,
+    pub checksum_adjustment: u32,
 
     _phantom: PhantomData<A>,
 }
 
 #[tracing::instrument(skip_all, level = "trace")]
-pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
+pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate::io::CoreRead>(
     _allocator: A,
     _prev_tables: &[Table<A>],
-    data: CoreVec<u8, A>,
-) -> Result<Type<A>, Error<IoError>> {
-    let major_version =
-        u16::from_be_bytes(data[..2].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::majorVersion",
-            needed:   2 - data.len(),
-        })?);
-    let minor_version =
-        u16::from_be_bytes(data[2..4].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::minorVersion",
-            needed:   4 - data.len(),
-        })?);
+    reader: &mut R,
+) -> Result<Type<A>, Error<R::IoError>> {
+    let major_version: u16 = reader.read_int()?;
+    let minor_version: u16 = reader.read_int()?;
 
     if major_version != 1 && minor_version != 0 {
         return Err(Error::InvalidVersion {
@@ -55,21 +49,20 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         });
     }
 
-    let font_revision =
-        fixed::types::I16F16::from_be_bytes(data[4..8].try_into().map_err(|_| {
-            Error::UnexpectedEop {
-                location: "head::fontRevision",
-                needed:   8 - data.len(),
-            }
-        })?);
+    let mut font_revision = [0u8; 4];
+    let read = reader.read(&mut font_revision)?;
+    if read != font_revision.len() {
+        return Err(Error::UnexpectedEop {
+            location: "head::fontRevision",
+            needed:   font_revision.len() - read,
+        });
+    }
+    let font_revision = fixed::types::I16F16::from_be_bytes(font_revision);
     tracing::event!(tracing::Level::DEBUG, "Font Revision: {font_revision}");
 
-    // 8..12 - Skip checksumAdjustment, already verified
+    let checksum_adjustment: u32 = reader.read_int()?;
 
-    let magic = u32::from_be_bytes(data[12..16].try_into().map_err(|_| Error::UnexpectedEop {
-        location: "head::magic",
-        needed:   12 - data.len(),
-    })?);
+    let magic: u32 = reader.read_int()?;
     if magic != 0x5f0f_3cf5_u32 {
         return Err(Error::Parsing {
             variable: "head::magic",
@@ -79,12 +72,9 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
     }
 
     // 16..18 Skip flags
+    reader.skip(2)?;
 
-    let units_per_em =
-        u16::from_be_bytes(data[18..20].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::unitsPerEm",
-            needed:   20 - data.len(),
-        })?);
+    let units_per_em: u16 = reader.read_int()?;
     if !(16..=16384).contains(&units_per_em) {
         return Err(Error::Parsing {
             variable: "head::unitsPerEm",
@@ -93,16 +83,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         });
     }
 
-    let created_time =
-        i64::from_be_bytes(data[20..28].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::created",
-            needed:   28 - data.len(),
-        })?);
-    let modified_time =
-        i64::from_be_bytes(data[28..36].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::modified",
-            needed:   36 - data.len(),
-        })?);
+    let created_time: i64 = reader.read_int()?;
+    let modified_time: i64 = reader.read_int()?;
     tracing::event!(
         tracing::Level::DEBUG,
         "Created: {}",
@@ -114,30 +96,18 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         crate::ValidType::LDT(modified_time)
     );
 
-    // 36..38 Skip xMin
-    // 38..40 Skip yMin
-    // 40..42 Skip xMax
-    // 42..44 Skip yMax
+    let _x_min: i16 = reader.read_int()?;
+    let _y_min: i16 = reader.read_int()?;
+    let _x_max: i16 = reader.read_int()?;
+    let _y_max: i16 = reader.read_int()?;
 
-    let style = u16::from_be_bytes(data[44..46].try_into().map_err(|_| Error::UnexpectedEop {
-        location: "head::macStyle",
-        needed:   46 - data.len(),
-    })?);
-
-    let smallest_px_size =
-        u16::from_be_bytes(data[46..48].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::lowestRecPPEM",
-            needed:   48 - data.len(),
-        })?);
+    let style: u16 = reader.read_int()?;
+    let smallest_px_size: u16 = reader.read_int()?;
 
     // Deprecated
-    // 48..50 Skip fontDirectionHint
+    let _font_dir_hint: i16 = reader.read_int()?;
 
-    let long_offset =
-        u16::from_be_bytes(data[50..52].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::indexToLocFormat",
-            needed:   52 - data.len(),
-        })?);
+    let long_offset: u16 = reader.read_int()?;
     if long_offset > 1 {
         return Err(Error::Parsing {
             variable: "head::indexToLocFormat",
@@ -146,11 +116,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         });
     }
 
-    let glyf_format =
-        u16::from_be_bytes(data[52..54].try_into().map_err(|_| Error::UnexpectedEop {
-            location: "head::glyphDataFormat",
-            needed:   52 - data.len(),
-        })?);
+    let glyf_format: u16 = reader.read_int()?;
     if glyf_format != 0 {
         return Err(Error::Parsing {
             variable: "head::glyphDataFormat",
@@ -163,6 +129,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         units_per_em,
         style,
         smallest_px_size,
+        checksum_adjustment,
         long_offset: long_offset == 1,
         _phantom: PhantomData {},
     })
