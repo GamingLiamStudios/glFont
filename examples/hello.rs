@@ -3,7 +3,7 @@
 #![feature(allocator_api)]
 
 use std::{
-    alloc::Global,
+    alloc,
     error::Error,
     fs,
 };
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing::subscriber::set_global_default(fmt_subscriber)?;
 
     let mut font_file = fs::File::open("NotoSerif-Regular.ttf")?;
-    let _font = glfont::open_font(Global, &mut font_file)?;
+    let _font = glfont::open_font(alloc::Global, &mut font_file)?;
 
     println!("Hello World!");
 

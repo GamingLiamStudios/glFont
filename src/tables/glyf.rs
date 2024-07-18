@@ -29,5 +29,15 @@ pub fn parse_table<A: core::alloc::Allocator + Copy, IoError>(
         });
     };
 
-    Ok(CoreVec::new_in(allocator))
+    let num_glyphs = *match maxp {
+        super::maxp::Type::Ver05 { num_glyphs } | super::maxp::Type::Ver10 { num_glyphs, .. } => {
+            num_glyphs
+        },
+        super::maxp::Type::_Phantom(_) => unreachable!(),
+    };
+
+    let mut glyphs = CoreVec::with_capacity_in(num_glyphs as usize, allocator);
+    glyphs.push(Type { data });
+
+    Ok(glyphs)
 }

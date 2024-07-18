@@ -8,8 +8,6 @@
 
 use std::fmt::Display;
 
-use tables::Table;
-
 mod io;
 mod tables;
 
@@ -34,7 +32,7 @@ pub enum ValidType {
 
     Tag([u8; 4]),
 
-    // Packed version - major minor - what the actual shit is this
+    // Packed version - 16 major, 16 minor
     PVer(u32),
 
     _USize(usize),
@@ -57,7 +55,7 @@ impl Display for ValidType {
             Self::LDT(v) => {
                 const UNIX_DIFF: i64 = 2_082_888_000; // Difference in Seconds between EPOCH and UNIX_EPOCH
                 let datetime =
-                    chrono::DateTime::from_timestamp(*v + UNIX_DIFF, 0).expect("Invalid Timestamp");
+                    chrono::DateTime::from_timestamp(*v - UNIX_DIFF, 0).expect("Invalid Timestamp");
                 write!(f, "{datetime}")
             },
             Self::Tag(v) => {
@@ -78,8 +76,8 @@ pub enum Error<IoError> {
     IoError(#[from] IoError),
 
     /// TTF sfntVersion is invalid/unsupported
-    #[error("Invalid Version {0:?}")]
-    InvalidVersion([u8; 4]),
+    #[error("Invalid Sfnt Version {0:?}")]
+    InvalidSfntVersion([u8; 4]),
 
     /// Parsing error
     #[error("Invalid value at {variable} (Expected {expected}, got {parsed})")]
@@ -87,6 +85,12 @@ pub enum Error<IoError> {
         variable: &'static str,
         expected: ValidType,
         parsed:   ValidType,
+    },
+
+    #[error("Invalid version at {location} (got {version})")]
+    InvalidVersion {
+        location: &'static str,
+        version:  u32,
     },
 
     /// Allocator failed
@@ -99,6 +103,12 @@ pub enum Error<IoError> {
 
     #[error("Unexpected EOF at {0}")]
     UnexpectedEof(usize),
+
+    #[error("Unexpected EOP in {location} (needed {needed})")]
+    UnexpectedEop {
+        location: &'static str,
+        needed:   usize,
+    },
 
     #[error("Missing required table {missing} to parse {parsing}")]
     MissingTable {
@@ -124,7 +134,7 @@ fn verify_header<IoError: core::error::Error>(
 
     // version check
     if read_buf[0..4] != [0x00, 0x01, 0x00, 0x00] {
-        return Err(Error::InvalidVersion(
+        return Err(Error::InvalidSfntVersion(
             read_buf[..4]
                 .try_into()
                 .expect("Failed to make Array (4) from Slice (16)"),
@@ -136,7 +146,7 @@ fn verify_header<IoError: core::error::Error>(
             .try_into()
             .expect("Failed to make Array (2) from Slice (16)"),
     );
-    println!("NumTables {num_tables}");
+    tracing::trace!("NumTables: {num_tables}");
 
     let search_range = u16::from_be_bytes(
         read_buf[6..8]
@@ -183,6 +193,7 @@ fn verify_header<IoError: core::error::Error>(
 /// # Panics
 /// - If Slice of size `N` is unable to cast to array of type `[u8; N]`
 /// - If Downcast fails
+#[tracing::instrument(level = "trace", skip_all)]
 pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
     allocator: A,
     input: &mut impl io::CoreRead<IoError>,
@@ -237,7 +248,11 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
         tables.push((tag, checksum, offset as usize, length as usize));
     }
 
-    println!("Read {index} bytes");
+    tracing::event!(
+        name: "Header",
+        tracing::Level::TRACE,
+        "Bytes read: {index}"
+    );
     let mut parsed_tables = Vec::new_in(allocator);
 
     let mut checksum_adj = 0;
@@ -245,7 +260,10 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
     tables.sort_by(|(_, _, a, _), (_, _, b, _)| a.cmp(b));
     for (tag, checksum, offset, length) in tables {
         if offset != index {
-            println!("Index Mismatch! expected {offset}, got {index}");
+            tracing::event!(
+                tracing::Level::WARN,
+                "Read Mismatch! expected {offset}, got {index}"
+            );
             // Fix read bytes
 
             while index < offset {
@@ -278,12 +296,18 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
             (checksum_act, _) = checksum_act.overflowing_add(u32::from_be_bytes(block));
 
             let read_len = 4.min(offset + length - index);
-            data_vec.extend_from_slice(&block[..read_len]); // can probably replace with push_within_capacity and remove need for read_len
+            data_vec.extend_from_slice(&block[..read_len]);
+            // can probably replace with push_within_capacity and remove need for read_len
+            // (when un-feature-gated)
 
             index += 4;
         }
 
-        println!("Read {}: {length} at {offset}", ValidType::Tag(tag));
+        tracing::event!(
+            tracing::Level::TRACE,
+            "Read {}: {length} at {offset}",
+            ValidType::Tag(tag)
+        );
 
         if tag == *b"head" {
             // find `checksumAdjustment` bytes and subtract from computed checksum
@@ -315,7 +339,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy, IoError: core::error::Error>(
     }
 
     // ChecksumAdjustment may be set to 0 for version 'OTTO'
-    (checksum_full, _) = 0xb1b0afbau32.overflowing_sub(checksum_full);
+    (checksum_full, _) = 0xb1b0_afba_u32.overflowing_sub(checksum_full);
     if checksum_full != checksum_adj {
         return Err(Error::Parsing {
             variable: "ChecksumAdjustment",
