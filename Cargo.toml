@@ -1,0 +1,26 @@
+[package]
+name = "glfont"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "GamingLiamStudios <58615717+GamingLiamStudios@users.noreply.github.com>",
+]
+license = "LGPL-2.1-only"
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+thiserror = "1"
+fixed = "1.27"
+chrono = "0.4"
+
+paste = "1"
+
+[lints.clippy]
+enum_glob_use = "deny"
+pedantic = "deny"
+nursery = "deny"
+unwrap_used = "deny"
+perf = "deny"
+all = "deny"
