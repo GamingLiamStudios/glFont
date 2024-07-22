@@ -11,13 +11,15 @@ license = "LGPL-2.1-only"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
-thiserror = "1"
+thiserror = "1" # TODO: use derive_more
 fixed = "1.27"
 chrono = "0.4"
 
 paste = "1"
 num-traits = "0.2"
 bytemuck = "1.16"
+
+itertools = "0.13"
 
 [lints.clippy]
 enum_glob_use = "deny"

@@ -1,6 +1,5 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
-use crate::io;
 
 macro_rules! create_table {
     {$($tag:ident),* $(,)*} => {
@@ -10,13 +9,13 @@ macro_rules! create_table {
             )*
 
             #[derive(Debug)]
-            pub enum Table<A: core::alloc::Allocator + core::fmt::Debug> {
+            pub enum Table<A: core::alloc::Allocator + core::fmt::Debug + 'static> {
                 $(
                     [<$tag:camel>]([<$tag:lower>]::ParsedType<A>),
                 )*
             }
 
-            pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate::io::CoreRead>(
+            pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: crate::io::CoreRead>(
                 allocator: A,
                 prev_tables: &[Table<A>],
                 tag: [u8; 4],

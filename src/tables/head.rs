@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use super::Table;
 use crate::{
-    io::CoreVec,
+    types,
     Error,
 };
 
@@ -66,8 +66,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if magic != 0x5f0f_3cf5_u32 {
         return Err(Error::Parsing {
             variable: "head::magic",
-            expected: crate::ValidType::U32(0x5f0f_3cf5_u32),
-            parsed:   crate::ValidType::U32(magic),
+            expected: types::ValidType::U32(0x5f0f_3cf5_u32),
+            parsed:   types::ValidType::U32(magic),
         });
     }
 
@@ -78,8 +78,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if !(16..=16384).contains(&units_per_em) {
         return Err(Error::Parsing {
             variable: "head::unitsPerEm",
-            expected: crate::ValidType::U16(if units_per_em < 16 { 16 } else { 16384 }),
-            parsed:   crate::ValidType::U16(units_per_em),
+            expected: types::ValidType::U16(if units_per_em < 16 { 16 } else { 16384 }),
+            parsed:   types::ValidType::U16(units_per_em),
         });
     }
 
@@ -88,12 +88,12 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     tracing::event!(
         tracing::Level::DEBUG,
         "Created: {}",
-        crate::ValidType::LDT(created_time)
+        types::ValidType::Ldt(created_time)
     );
     tracing::event!(
         tracing::Level::DEBUG,
         "Modified: {}",
-        crate::ValidType::LDT(modified_time)
+        types::ValidType::Ldt(modified_time)
     );
 
     let _x_min: i16 = reader.read_int()?;
@@ -111,8 +111,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if long_offset > 1 {
         return Err(Error::Parsing {
             variable: "head::indexToLocFormat",
-            expected: crate::ValidType::U16(1),
-            parsed:   crate::ValidType::U16(long_offset),
+            expected: types::ValidType::U16(1),
+            parsed:   types::ValidType::U16(long_offset),
         });
     }
 
@@ -120,8 +120,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if glyf_format != 0 {
         return Err(Error::Parsing {
             variable: "head::glyphDataFormat",
-            expected: crate::ValidType::U16(0),
-            parsed:   crate::ValidType::U16(glyf_format),
+            expected: types::ValidType::U16(0),
+            parsed:   types::ValidType::U16(glyf_format),
         });
     }
 

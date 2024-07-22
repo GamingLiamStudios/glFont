@@ -1,8 +1,6 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
 
-use std::io::Read;
-
 #[derive(thiserror::Error, Debug)]
 pub enum CoreReadError<IoError: core::fmt::Debug> {
     #[error(transparent)]
@@ -63,6 +61,36 @@ impl<T: std::io::Read> CoreRead for T {
         buf: &mut [u8],
     ) -> Result<usize, CoreReadError<Self::IoError>> {
         self.read(buf).map_err(CoreReadError::Io)
+    }
+}
+
+pub struct TrackingReader<'a, R: CoreRead> {
+    reader: &'a mut R,
+    index:  usize,
+}
+
+impl<'a, R: CoreRead> TrackingReader<'a, R> {
+    pub fn new(reader: &'a mut R) -> Self {
+        Self { reader, index: 0 }
+    }
+
+    pub const fn finish(self) -> usize {
+        self.index
+    }
+
+    pub const fn total_read(&self) -> usize {
+        self.index
+    }
+}
+
+impl<R: CoreRead> CoreRead for TrackingReader<'_, R> {
+    type IoError = R::IoError;
+
+    fn read(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Result<usize, CoreReadError<Self::IoError>> {
+        self.reader.read(buf).inspect(|read| self.index += read)
     }
 }
 
@@ -133,5 +161,4 @@ impl<R: CoreRead> CoreRead for ChecksumReader<'_, R> {
     }
 }
 
-// TODO: Custom no_std Vec type
-pub type CoreVec<T, A> = std::vec::Vec<T, A>;
+pub type CoreVec<T, A> = alloc::vec::Vec<T, A>;
