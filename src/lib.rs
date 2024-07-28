@@ -6,72 +6,26 @@
 #![feature(allocator_api)] // no_std
 #![feature(generic_const_exprs)] // CoreRead::read_int
 #![feature(new_range_api)] // glyf
+#![feature(new_uninit)] // name
 #![allow(clippy::missing_errors_doc)]
 #![allow(incomplete_features)]
 
 extern crate alloc;
 
-use io::CoreRead;
-
-mod io;
+mod font;
 mod tables;
 mod types;
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error<IoError: core::fmt::Debug> {
-    #[error(transparent)]
-    IoError(#[from] io::CoreReadError<IoError>),
+pub use font::Trait as FontTrait;
+pub use tables::name::RecordType as NameRecord;
+use types::{
+    ChecksumReader,
+    CoreRead,
+    CoreVec,
+    Error,
+};
 
-    /// TTF sfntVersion is invalid/unsupported
-    #[error("Invalid Sfnt Version {0:?}")]
-    InvalidSfntVersion([u8; 4]),
-
-    /// Parsing error
-    #[error("Invalid value at {variable} (Expected {expected}, got {parsed})")]
-    Parsing {
-        variable: &'static str,
-        expected: types::ValidType,
-        parsed:   types::ValidType,
-    },
-
-    #[error("Invalid tag {0:?}")]
-    InvalidTag([u8; 4]),
-
-    #[error("Invalid version at {location} (got {version})")]
-    InvalidVersion {
-        location: &'static str,
-        version:  u32,
-    },
-
-    /// Allocator failed
-    #[error("Allocating {location} failed (expected {expected}, got {allocated}")]
-    Allocation {
-        location:  &'static str,
-        expected:  usize,
-        allocated: usize,
-    },
-
-    #[error("Unexpected EOF at {0}")]
-    UnexpectedEof(usize),
-
-    #[error("Unexpected EOP in {location} (needed {needed})")]
-    UnexpectedEop {
-        location: &'static str,
-        needed:   usize,
-    },
-
-    #[error("Missing required table {missing} to parse {parsing}")]
-    MissingTable {
-        missing: &'static str,
-        parsing: &'static str,
-    },
-}
-
-pub struct Font<A: core::alloc::Allocator + core::fmt::Debug + 'static = alloc::alloc::Global> {
-    tables: io::CoreVec<tables::Table<A>, A>,
-}
-
-fn verify_header<R: io::CoreRead>(input: &mut R) -> Result<u16, Error<R::IoError>> {
+fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, Error<R::IoError>> {
     let mut version = [0; 4];
     input.read(&mut version)?;
     if version != [0x00, 0x01, 0x00, 0x00] {
@@ -115,14 +69,14 @@ fn verify_header<R: io::CoreRead>(input: &mut R) -> Result<u16, Error<R::IoError
 /// - If Slice of size `N` is unable to cast to array of type `[u8; N]`
 /// - If Downcast fails
 #[tracing::instrument(level = "trace", skip_all)]
-pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: io::CoreRead>(
+pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: CoreRead>(
     allocator: A,
     input: &mut R,
-) -> Result<Font<A>, Error<R::IoError>> {
-    let mut reader = io::ChecksumReader::new(input);
+) -> Result<font::Font<A>, Error<R::IoError>> {
+    let mut reader = ChecksumReader::new(input);
 
     let num_tables = verify_header(&mut reader)?;
-    let mut tables = Vec::with_capacity_in(num_tables as usize, allocator);
+    let mut tables = CoreVec::with_capacity_in(num_tables as usize, allocator);
 
     for _ in 0..num_tables {
         let mut tag = [0u8; 4];
@@ -162,7 +116,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
             reader.skip(offset - reader.total_read())?;
         }
 
-        let mut tag_reader = io::ChecksumReader::new(&mut reader);
+        let mut tag_reader = ChecksumReader::new(&mut reader);
 
         tracing::event!(
             tracing::Level::TRACE,
@@ -195,7 +149,10 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
         }
 
         if checksum_act != checksum {
-            println!("Checksum invalid! {checksum} != {checksum_act}");
+            tracing::event!(
+                tracing::Level::TRACE,
+                "Checksum invalid! {checksum} != {checksum_act}"
+            );
             /*
             return Err(Error::Parsing {
                 variable: "TableChecksum",
@@ -225,7 +182,5 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
         });
     }
 
-    Ok(Font {
-        tables: parsed_tables,
-    })
+    Ok(parsed_tables)
 }

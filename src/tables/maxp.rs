@@ -4,8 +4,8 @@
 use std::marker::PhantomData;
 
 use super::Table;
-use crate::{
-    io,
+use crate::types::{
+    CoreRead,
     Error,
 };
 
@@ -25,7 +25,7 @@ pub enum Type<A: core::alloc::Allocator> {
 }
 
 #[tracing::instrument(skip_all, level = "trace")]
-pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::CoreRead>(
+pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreRead>(
     _allocator: A,
     _prev_tables: &[Table<A>],
     reader: &mut R,

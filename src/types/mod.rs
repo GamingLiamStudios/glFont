@@ -1,3 +1,13 @@
+// Copyright (C) 2024 GLStudios
+// SPDX-License-Identifier: LGPL-2.1-only
+mod io;
+
+pub use io::*;
+
+// In case we decide to not use the default Vec impl (for whatever reason)
+pub type CoreVec<T, A> = alloc::vec::Vec<T, A>;
+pub type CoreBox<T, A> = alloc::boxed::Box<T, A>;
+
 #[derive(Debug)]
 pub enum ValidType {
     U8(u8),
@@ -55,4 +65,54 @@ impl core::fmt::Display for ValidType {
             Self::_USize(v) => write!(f, "{v}"),
         }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error<IoError: core::fmt::Debug> {
+    #[error(transparent)]
+    Io(#[from] CoreReadError<IoError>),
+
+    /// TTF sfntVersion is invalid/unsupported
+    #[error("Invalid Sfnt Version {0:?}")]
+    InvalidSfntVersion([u8; 4]),
+
+    /// Parsing error
+    #[error("Invalid value at {variable} (Expected {expected}, got {parsed})")]
+    Parsing {
+        variable: &'static str,
+        expected: ValidType,
+        parsed:   ValidType,
+    },
+
+    #[error("Invalid tag {0:?}")]
+    InvalidTag([u8; 4]),
+
+    #[error("Invalid version at {location} (got {version})")]
+    InvalidVersion {
+        location: &'static str,
+        version:  u32,
+    },
+
+    /// Allocator failed
+    #[error("Allocating {location} failed (expected {expected}, got {allocated}")]
+    Allocation {
+        location:  &'static str,
+        expected:  usize,
+        allocated: usize,
+    },
+
+    #[error("Unexpected EOF at {0}")]
+    UnexpectedEof(usize),
+
+    #[error("Unexpected EOP in {location} (needed {needed})")]
+    UnexpectedEop {
+        location: &'static str,
+        needed:   usize,
+    },
+
+    #[error("Missing required table {missing} to parse {parsing}")]
+    MissingTable {
+        missing: &'static str,
+        parsing: &'static str,
+    },
 }

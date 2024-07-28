@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 
 use super::Table;
-use crate::io::{
-    self,
+use crate::types::{
     CoreRead,
+    CoreVec,
+    Error,
+    TrackingReader,
 };
 
-pub type ParsedType<A> = io::CoreVec<Glyph<A>, A>;
+pub type ParsedType<A> = CoreVec<Glyph<A>, A>;
 
 pub struct Flags;
 impl Flags {
@@ -28,16 +30,16 @@ pub struct Glyph<A: core::alloc::Allocator> {
     y_bounds: core::range::RangeInclusive<i16>,
 
     // Simple Glyph
-    end_pts: io::CoreVec<u16, A>,
+    end_pts: CoreVec<u16, A>,
     // (x, y, on_curve)
-    points:  io::CoreVec<(i16, i16, bool), A>,
+    points:  CoreVec<(i16, i16, bool), A>,
     // instructions: io::CoreVec<u8, A>, // TODO: Parse bytecodes
 }
 
 macro_rules! read_coords {
     ($allocator:ident $reader:ident $flags:ident $type:ident) => {{
         paste::paste! {
-            let mut vec = io::CoreVec::with_capacity_in($flags.len(), $allocator);
+            let mut vec = CoreVec::with_capacity_in($flags.len(), $allocator);
             for flags in &$flags {
                 vec.push(
                     match (
@@ -51,19 +53,18 @@ macro_rules! read_coords {
                     },
                 );
             }
+
+            vec.shrink_to_fit();
             vec
         }
     }};
 }
 
-pub fn parse_table<
-    A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static,
-    R: io::CoreRead,
->(
+pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: CoreRead>(
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<ParsedType<A>, crate::Error<R::IoError>> {
+) -> Result<ParsedType<A>, Error<R::IoError>> {
     // Requires `maxp` + `loca` tables
     let Some(Table::Loca(loca)) = prev_tables.iter().find(|v| matches!(v, Table::Loca(_))) else {
         return Err(crate::Error::MissingTable {
@@ -72,8 +73,8 @@ pub fn parse_table<
         });
     };
 
-    let mut glyphs: io::CoreVec<Glyph<A>, A> = io::CoreVec::with_capacity_in(loca.len(), allocator);
-    let mut reader = io::TrackingReader::new(reader);
+    let mut glyphs = CoreVec::with_capacity_in(loca.len(), allocator);
+    let mut reader = TrackingReader::new(reader);
 
     let mut prev_complex = false;
     for idx in 0..loca.len() {
@@ -84,14 +85,15 @@ pub fn parse_table<
                 num_contours: 0,
                 x_bounds:     (0..=0).into(),
                 y_bounds:     (0..=0).into(),
-                end_pts:      io::CoreVec::new_in(allocator),
-                points:       io::CoreVec::new_in(allocator),
+                end_pts:      CoreVec::new_in(allocator),
+                points:       CoreVec::new_in(allocator),
             });
             continue;
         }
 
         if !prev_complex && offset as usize != reader.total_read() {
-            println!(
+            tracing::event!(
+                tracing::Level::DEBUG,
                 "Index mismatch! expected {} got {}",
                 loca.index(idx).0,
                 reader.total_read()
@@ -117,7 +119,7 @@ pub fn parse_table<
         let y_bounds = core::range::RangeInclusive::from(y_min..=y_max);
 
         if num_contours == 0 {
-            println!("No contours");
+            tracing::event!(tracing::Level::TRACE, "No contours");
         }
 
         if num_contours < 0 {
@@ -129,7 +131,7 @@ pub fn parse_table<
         }
 
         // Read end_pts bytes
-        let mut end_pts = io::CoreVec::with_capacity_in(
+        let mut end_pts = CoreVec::with_capacity_in(
             usize::try_from(num_contours).expect("Signed to Unsigned cast failed"),
             allocator,
         );
@@ -146,7 +148,7 @@ pub fn parse_table<
         // flags has to be handled manually as we need to duplicate the repeats
         let num_points = usize::from(*end_pts.last().expect("No points in Glyph")) + 1;
 
-        let mut flags_vec = io::CoreVec::with_capacity_in(num_points, allocator);
+        let mut flags_vec = CoreVec::with_capacity_in(num_points, allocator);
         while flags_vec.len() != num_points {
             let flags: u8 = reader.read_int()?;
 
@@ -159,12 +161,13 @@ pub fn parse_table<
                 flags_vec.push(flags & !Flags::REPEAT);
             }
         }
+        flags_vec.shrink_to_fit();
 
         // in the quest for lower LOC count
         let x_coords = read_coords!(allocator reader flags_vec X);
         let y_coords = read_coords!(allocator reader flags_vec Y);
 
-        let mut points = io::CoreVec::with_capacity_in(num_points, allocator);
+        let mut points = CoreVec::with_capacity_in(num_points, allocator);
         points.extend(
             itertools::izip!(flags_vec, x_coords, y_coords)
                 .map(|(f, x, y)| (x, y, f & Flags::ON_CURVE != 0)),

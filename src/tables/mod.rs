@@ -5,7 +5,7 @@ macro_rules! create_table {
     {$($tag:ident),* $(,)*} => {
         paste::paste! {
             $(
-                mod [<$tag:lower>];
+                pub mod [<$tag:lower>];
             )*
 
             #[derive(Debug)]
@@ -15,7 +15,7 @@ macro_rules! create_table {
                 )*
             }
 
-            pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: crate::io::CoreRead>(
+            pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: crate::types::CoreRead>(
                 allocator: A,
                 prev_tables: &[Table<A>],
                 tag: [u8; 4],
@@ -48,5 +48,5 @@ macro_rules! create_table {
 }
 
 create_table! {
-    glyf, maxp, loca, head
+    glyf, maxp, loca, head, name
 }

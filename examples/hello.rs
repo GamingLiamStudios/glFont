@@ -8,6 +8,8 @@ use std::{
     fs,
 };
 
+use glfont::FontTrait;
+
 fn main() -> Result<(), Box<dyn Error>> {
     let fmt_subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_max_level(tracing::Level::TRACE)
@@ -15,9 +17,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing::subscriber::set_global_default(fmt_subscriber)?;
 
     let mut font_file = fs::File::open("NotoSerif-Regular.ttf")?;
-    let _font = glfont::open_font(alloc::Global, &mut font_file)?;
+    let font = glfont::open_font(alloc::Global, &mut font_file)?;
 
     println!("Hello World!");
+    println!(
+        "Font name is {}",
+        font.name_record(glfont::NameRecord::Full)
+            .unwrap_or("Unknown")
+    );
 
     Ok(())
 }

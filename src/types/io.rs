@@ -160,5 +160,3 @@ impl<R: CoreRead> CoreRead for ChecksumReader<'_, R> {
         })
     }
 }
-
-pub type CoreVec<T, A> = alloc::vec::Vec<T, A>;

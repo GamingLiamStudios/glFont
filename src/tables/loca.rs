@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 
 use super::Table;
-use crate::{
-    io,
-    types,
+use crate::types::{
+    CoreRead,
+    CoreVec,
     Error,
+    ValidType,
 };
 
 pub type ParsedType<A> = Type<A>;
 
 #[derive(Debug)]
 pub struct Type<A: core::alloc::Allocator> {
-    offsets: io::CoreVec<u32, A>,
+    offsets: CoreVec<u32, A>,
 }
 
 impl<A: core::alloc::Allocator> Type<A> {
@@ -30,7 +31,7 @@ impl<A: core::alloc::Allocator> Type<A> {
 }
 
 #[tracing::instrument(skip_all, level = "trace")]
-pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::CoreRead>(
+pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreRead>(
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
@@ -57,7 +58,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::C
     } as usize
         + 1;
 
-    let mut offsets = io::CoreVec::with_capacity_in(num_glyphs, allocator);
+    let mut offsets = CoreVec::with_capacity_in(num_glyphs, allocator);
     offsets.resize(num_glyphs, 0);
 
     let mut prev = u32::MIN;
@@ -70,8 +71,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::C
             if *offset < prev {
                 return Err(Error::Parsing {
                     variable: "loca",
-                    expected: types::ValidType::U32(prev + 1),
-                    parsed:   types::ValidType::U32(*offset),
+                    expected: ValidType::U32(prev + 1),
+                    parsed:   ValidType::U32(*offset),
                 });
             }
             prev = *offset;
@@ -86,8 +87,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: io::C
             if *offset < prev {
                 return Err(Error::Parsing {
                     variable: "loca",
-                    expected: types::ValidType::U32(prev + 1),
-                    parsed:   types::ValidType::U32(*offset),
+                    expected: ValidType::U32(prev + 1),
+                    parsed:   ValidType::U32(*offset),
                 });
             }
             prev = *offset;

@@ -4,13 +4,15 @@
 use std::marker::PhantomData;
 
 use super::Table;
-use crate::{
-    types,
+use crate::types::{
+    CoreRead,
     Error,
+    ValidType,
 };
 
 pub type ParsedType<A> = Type<A>;
 
+#[allow(unused)]
 struct Style;
 impl Style {
     const BOLD: u16 = 1 << 0;
@@ -34,7 +36,7 @@ pub struct Type<A: core::alloc::Allocator> {
 }
 
 #[tracing::instrument(skip_all, level = "trace")]
-pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate::io::CoreRead>(
+pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreRead>(
     _allocator: A,
     _prev_tables: &[Table<A>],
     reader: &mut R,
@@ -66,8 +68,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if magic != 0x5f0f_3cf5_u32 {
         return Err(Error::Parsing {
             variable: "head::magic",
-            expected: types::ValidType::U32(0x5f0f_3cf5_u32),
-            parsed:   types::ValidType::U32(magic),
+            expected: ValidType::U32(0x5f0f_3cf5_u32),
+            parsed:   ValidType::U32(magic),
         });
     }
 
@@ -78,8 +80,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if !(16..=16384).contains(&units_per_em) {
         return Err(Error::Parsing {
             variable: "head::unitsPerEm",
-            expected: types::ValidType::U16(if units_per_em < 16 { 16 } else { 16384 }),
-            parsed:   types::ValidType::U16(units_per_em),
+            expected: ValidType::U16(if units_per_em < 16 { 16 } else { 16384 }),
+            parsed:   ValidType::U16(units_per_em),
         });
     }
 
@@ -88,12 +90,12 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     tracing::event!(
         tracing::Level::DEBUG,
         "Created: {}",
-        types::ValidType::Ldt(created_time)
+        ValidType::Ldt(created_time)
     );
     tracing::event!(
         tracing::Level::DEBUG,
         "Modified: {}",
-        types::ValidType::Ldt(modified_time)
+        ValidType::Ldt(modified_time)
     );
 
     let _x_min: i16 = reader.read_int()?;
@@ -111,8 +113,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if long_offset > 1 {
         return Err(Error::Parsing {
             variable: "head::indexToLocFormat",
-            expected: types::ValidType::U16(1),
-            parsed:   types::ValidType::U16(long_offset),
+            expected: ValidType::U16(1),
+            parsed:   ValidType::U16(long_offset),
         });
     }
 
@@ -120,8 +122,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: crate
     if glyf_format != 0 {
         return Err(Error::Parsing {
             variable: "head::glyphDataFormat",
-            expected: types::ValidType::U16(0),
-            parsed:   types::ValidType::U16(glyf_format),
+            expected: ValidType::U16(0),
+            parsed:   ValidType::U16(glyf_format),
         });
     }
 
