@@ -48,5 +48,5 @@ macro_rules! create_table {
 }
 
 create_table! {
-    glyf, maxp, loca, head, name
+    glyf, maxp, loca, head, name, hhea, hmtx
 }

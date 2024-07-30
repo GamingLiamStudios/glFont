@@ -227,7 +227,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
         ));
     }
 
-    println!("{records:#?}");
+    //println!("{records:#?}");
 
     Ok(Type { records })
 }

@@ -19,6 +19,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .finish();
     tracing::subscriber::set_global_default(fmt_subscriber)?;
 
+    // Would use WM supplied info to calc this in actual use
+    const DPI: u16 = 96;
+
     let mut fonts = FontCollection::new(alloc::Global);
 
     let mut font_file = fs::File::open("NotoSerif-Regular.ttf")?;
