@@ -53,6 +53,7 @@ pub trait CoreRead {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T: std::io::Read> CoreRead for T {
     type IoError = std::io::Error;
 

@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 
 use super::Table;
-use crate::types::{
-    CoreRead,
-    CoreVec,
-    Error,
-    ValidType,
+use crate::{
+    types::{
+        CoreRead,
+        CoreVec,
+        ValidType,
+    },
+    FontError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -35,16 +37,16 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<Type<A>, Error<R::IoError>> {
+) -> Result<Type<A>, FontError<R::IoError>> {
     let Some(Table::Head(head)) = prev_tables.iter().find(|v| matches!(v, Table::Head(_))) else {
-        return Err(crate::Error::MissingTable {
+        return Err(FontError::MissingTable {
             missing: "head",
             parsing: "loca",
         });
     };
 
     let Some(Table::Maxp(maxp)) = prev_tables.iter().find(|v| matches!(v, Table::Maxp(_))) else {
-        return Err(crate::Error::MissingTable {
+        return Err(FontError::MissingTable {
             missing: "maxp",
             parsing: "loca",
         });
@@ -69,7 +71,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
             // loca[n + 1] >= loca[n]
             if *offset < prev {
-                return Err(Error::Parsing {
+                return Err(FontError::Parsing {
                     variable: "loca",
                     expected: ValidType::U32(prev + 1),
                     parsed:   ValidType::U32(*offset),
@@ -85,7 +87,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
             // loca[n + 1] >= loca[n]
             if *offset < prev {
-                return Err(Error::Parsing {
+                return Err(FontError::Parsing {
                     variable: "loca",
                     expected: ValidType::U32(prev + 1),
                     parsed:   ValidType::U32(*offset),

@@ -1,12 +1,12 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use super::Table;
-use crate::types::{
-    CoreRead,
-    Error,
+use crate::{
+    types::CoreRead,
+    FontError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -29,7 +29,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     _allocator: A,
     _prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<Type<A>, Error<R::IoError>> {
+) -> Result<Type<A>, FontError<R::IoError>> {
     // Must be at least 6 bytes (v16d16 + u16)
     let packed_ver: u32 = reader.read_int()?;
 
@@ -48,7 +48,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
                 num_glyphs: reader.read_int()?,
             })
         },
-        _ => Err(Error::InvalidVersion {
+        _ => Err(FontError::InvalidVersion {
             location: "maxp",
             version:  packed_ver,
         }),

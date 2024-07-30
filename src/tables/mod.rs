@@ -20,7 +20,7 @@ macro_rules! create_table {
                 prev_tables: &[Table<A>],
                 tag: [u8; 4],
                 reader: &mut R,
-            ) -> Result<Table<A>, crate::Error<R::IoError>> {
+            ) -> Result<Table<A>, crate::FontError<R::IoError>> {
                 $(
                     const [<$tag:upper>]: [u8; stringify!([<$tag:lower>]).len()] = {
                         const BYTES: &[u8] = stringify!([<$tag:lower>]).as_bytes();
@@ -39,7 +39,7 @@ macro_rules! create_table {
                         $(
                             [<$tag:upper>] => Ok(Table::[<$tag:camel>]([<$tag:lower>]::parse_table(allocator, prev_tables, reader)?)),
                         )*
-                        _ => Err(crate::Error::InvalidTag(tag))
+                        _ => Err(crate::FontError::InvalidTag(tag))
                     }
 
             }

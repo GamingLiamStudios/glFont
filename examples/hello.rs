@@ -8,7 +8,10 @@ use std::{
     fs,
 };
 
-use glfont::FontTrait;
+use glfont::{
+    FontCollection,
+    FontTrait,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let fmt_subscriber = tracing_subscriber::fmt::Subscriber::builder()
@@ -16,15 +19,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .finish();
     tracing::subscriber::set_global_default(fmt_subscriber)?;
 
+    let mut fonts = FontCollection::new(alloc::Global);
+
     let mut font_file = fs::File::open("NotoSerif-Regular.ttf")?;
-    let font = glfont::open_font(alloc::Global, &mut font_file)?;
+    let font = fonts.add_loaded(glfont::open_font(alloc::Global, &mut font_file)?);
 
     println!("Hello World!");
-    println!(
-        "Font name is {}",
-        font.name_record(glfont::NameRecord::Full)
-            .unwrap_or("Unknown")
-    );
+    println!("Font id is {:?}", fonts.get(font).id());
 
     Ok(())
 }

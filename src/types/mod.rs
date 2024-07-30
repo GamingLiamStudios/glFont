@@ -1,8 +1,14 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
 mod io;
+mod slotmap;
 
 pub use io::*;
+pub use slotmap::{
+    Key as SlotmapKey,
+    //SecondaryMap,
+    Slotmap,
+};
 
 // In case we decide to not use the default Vec impl (for whatever reason)
 pub type CoreVec<T, A> = alloc::vec::Vec<T, A>;
@@ -38,8 +44,8 @@ pub enum ValidType {
 impl core::fmt::Display for ValidType {
     fn fmt(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+        f: &mut core::fmt::Formatter<'_>,
+    ) -> core::fmt::Result {
         match self {
             Self::U8(v) => write!(f, "{v}"),
             Self::I8(v) => write!(f, "{v}"),

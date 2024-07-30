@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 
 use super::Table;
-use crate::types::{
-    CoreRead,
-    CoreVec,
-    Error,
-    TrackingReader,
+use crate::{
+    types::{
+        CoreRead,
+        CoreVec,
+        TrackingReader,
+    },
+    FontError,
 };
 
 pub type ParsedType<A> = CoreVec<Glyph<A>, A>;
@@ -64,10 +66,10 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<ParsedType<A>, Error<R::IoError>> {
+) -> Result<ParsedType<A>, FontError<R::IoError>> {
     // Requires `maxp` + `loca` tables
     let Some(Table::Loca(loca)) = prev_tables.iter().find(|v| matches!(v, Table::Loca(_))) else {
-        return Err(crate::Error::MissingTable {
+        return Err(FontError::MissingTable {
             missing: "loca",
             parsing: "glyf",
         });
@@ -101,7 +103,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static
         }
         let _ = reader.skip(loca.index(idx).0 as usize - reader.total_read())?;
         if reader.total_read() != loca.index(idx).0 as usize {
-            return Err(crate::Error::UnexpectedEop {
+            return Err(FontError::UnexpectedEop {
                 location: "glyf",
                 needed:   loca.index(idx).0 as usize - reader.total_read(),
             });

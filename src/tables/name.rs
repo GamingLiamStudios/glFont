@@ -4,13 +4,15 @@
 use core::str;
 
 use super::Table;
-use crate::types::{
-    //CoreBox,
-    CoreBox,
-    CoreRead,
-    CoreVec,
-    Error,
-    TrackingReader,
+use crate::{
+    types::{
+        //CoreBox,
+        CoreBox,
+        CoreRead,
+        CoreVec,
+        TrackingReader,
+    },
+    FontError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -88,10 +90,13 @@ pub struct Record<A: core::alloc::Allocator> {
 }
 
 impl<A: core::alloc::Allocator + Copy> Record<A> {
+    /// WARNING: Will destructively modify `bytes`
+    /// # Panics
+    /// - If specified `encoding_id` is utf16 and bytes isn't u16 alligned
     fn from_utf16(
         allocator: A,
         bytes: &mut [u8],
-    ) -> Box<str, A> {
+    ) -> CoreBox<str, A> {
         let nibbles: &mut [u16] =
             bytemuck::try_cast_slice_mut(bytes).expect("Invalid input to `Record::from_bytes`");
         if cfg!(target_endian = "little") {
@@ -107,7 +112,8 @@ impl<A: core::alloc::Allocator + Copy> Record<A> {
             .clone()
             .fold(0usize, |size, c| size + c.len_utf8());
 
-        let mut utf8_slices = unsafe { Box::new_uninit_slice_in(bytes, allocator).assume_init() };
+        let mut utf8_slices =
+            unsafe { CoreBox::new_uninit_slice_in(bytes, allocator).assume_init() };
         let _ = char_iter.fold(0usize, |idx, c| {
             c.encode_utf8(&mut utf8_slices[idx..]);
             idx + c.len_utf8()
@@ -115,14 +121,11 @@ impl<A: core::alloc::Allocator + Copy> Record<A> {
 
         // literally just from_boxed_utf8_unchecked
         unsafe {
-            let (ptr, alloc) = Box::into_raw_with_allocator(utf8_slices); // should just be `allocator`
-            Box::from_raw_in(ptr as *mut str, alloc)
+            let (ptr, alloc) = CoreBox::into_raw_with_allocator(utf8_slices); // should just be `allocator`
+            CoreBox::from_raw_in(ptr as *mut str, alloc)
         }
     }
 
-    /// WARNING: Will destructively modify `bytes`
-    /// # Panics
-    /// - If specified `encoding_id` is utf16 and bytes isn't u16 alligned
     pub fn from_bytes(
         allocator: A,
         platform_id: u16,
@@ -135,6 +138,7 @@ impl<A: core::alloc::Allocator + Copy> Record<A> {
             name,
             string: match (platform_id, encoding_id, language_id) {
                 // Unicode
+                // TODO: Verify BMP types
                 (0, 3..4, _) | (3, 1 | 10, _) => Self::from_utf16(allocator, bytes),
                 (..) => panic!("Unrecognised record!"),
             },
@@ -152,7 +156,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     allocator: A,
     _prev_tables: &[Table<A>],
     reader_actual: &mut R,
-) -> Result<Type<A>, Error<R::IoError>> {
+) -> Result<Type<A>, FontError<R::IoError>> {
     let mut reader = TrackingReader::new(reader_actual);
 
     let version: u16 = reader.read_int()?;
@@ -202,10 +206,10 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     }
 
     let mut storage_area =
-        unsafe { Box::new_uninit_slice_in(storage_area_length, allocator).assume_init() };
+        unsafe { CoreBox::new_uninit_slice_in(storage_area_length, allocator).assume_init() };
     let read = reader_actual.read(&mut storage_area)?;
     if read < storage_area_length {
-        return Err(Error::UnexpectedEop {
+        return Err(FontError::UnexpectedEop {
             location: "name::storage_area",
             needed:   storage_area_length - read,
         });
@@ -222,6 +226,8 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
             &mut storage_area[begin..end],
         ));
     }
+
+    println!("{records:#?}");
 
     Ok(Type { records })
 }
