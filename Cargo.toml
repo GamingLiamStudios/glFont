@@ -27,6 +27,8 @@ bytemuck = { version = "1.16", features = [
 ] }
 
 itertools = "0.13"
+rgb = { version = "0.8", features = ["bytemuck"] }
+png = "0.17"
 
 [lints.clippy]
 enum_glob_use = "deny"

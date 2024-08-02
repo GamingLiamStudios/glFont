@@ -3,12 +3,10 @@
 
 use core::marker::PhantomData;
 
-use num_traits::ToPrimitive;
-
 use super::Table;
 use crate::{
     types::CoreRead,
-    FontError,
+    ParseError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -35,12 +33,12 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     _allocator: A,
     _prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<Type<A>, FontError<R::IoError>> {
+) -> Result<Type<A>, ParseError<R::IoError>> {
     let major_version: u16 = reader.read_int()?;
     let minor_version: u16 = reader.read_int()?;
 
     if major_version != 1 || minor_version != 0 {
-        return Err(FontError::InvalidVersion {
+        return Err(ParseError::InvalidVersion {
             location: "hhea",
             version:  (u32::from(major_version) << u16::BITS) | u32::from(minor_version),
         });
@@ -73,7 +71,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
     let data_format: i16 = reader.read_int()?;
     if data_format != 0 {
-        return Err(FontError::InvalidVersion {
+        return Err(ParseError::InvalidVersion {
             location: "hhea",
             version:  u32::try_from(data_format).expect("i16 -> u32 cast failure"),
         });

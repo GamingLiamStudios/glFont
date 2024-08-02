@@ -1,15 +1,13 @@
 // Copyright (C) 2024 GLStudios
 // SPDX-License-Identifier: LGPL-2.1-only
 
-use core::marker::PhantomData;
-
 use super::Table;
 use crate::{
     types::{
         CoreRead,
         CoreVec,
     },
-    FontError,
+    ParseError,
 };
 
 pub type ParsedType<A> = CoreVec<Type, A>;
@@ -25,16 +23,16 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<ParsedType<A>, FontError<R::IoError>> {
+) -> Result<ParsedType<A>, ParseError<R::IoError>> {
     let Some(Table::Maxp(maxp)) = prev_tables.iter().find(|v| matches!(v, Table::Maxp(_))) else {
-        return Err(FontError::MissingTable {
+        return Err(ParseError::MissingTable {
             missing: "maxp",
             parsing: "hmtx",
         });
     };
 
     let Some(Table::Hhea(hhea)) = prev_tables.iter().find(|v| matches!(v, Table::Hhea(_))) else {
-        return Err(FontError::MissingTable {
+        return Err(ParseError::MissingTable {
             missing: "hhea",
             parsing: "hmtx",
         });

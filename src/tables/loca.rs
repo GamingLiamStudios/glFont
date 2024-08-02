@@ -8,7 +8,7 @@ use crate::{
         CoreVec,
         ValidType,
     },
-    FontError,
+    ParseError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -37,16 +37,16 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<Type<A>, FontError<R::IoError>> {
+) -> Result<Type<A>, ParseError<R::IoError>> {
     let Some(Table::Head(head)) = prev_tables.iter().find(|v| matches!(v, Table::Head(_))) else {
-        return Err(FontError::MissingTable {
+        return Err(ParseError::MissingTable {
             missing: "head",
             parsing: "loca",
         });
     };
 
     let Some(Table::Maxp(maxp)) = prev_tables.iter().find(|v| matches!(v, Table::Maxp(_))) else {
-        return Err(FontError::MissingTable {
+        return Err(ParseError::MissingTable {
             missing: "maxp",
             parsing: "loca",
         });
@@ -71,7 +71,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
             // loca[n + 1] >= loca[n]
             if *offset < prev {
-                return Err(FontError::Parsing {
+                return Err(ParseError::Parsing {
                     variable: "loca",
                     expected: ValidType::U32(prev + 1),
                     parsed:   ValidType::U32(*offset),
@@ -87,7 +87,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
             // loca[n + 1] >= loca[n]
             if *offset < prev {
-                return Err(FontError::Parsing {
+                return Err(ParseError::Parsing {
                     variable: "loca",
                     expected: ValidType::U32(prev + 1),
                     parsed:   ValidType::U32(*offset),

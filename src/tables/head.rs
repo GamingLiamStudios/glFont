@@ -9,7 +9,7 @@ use crate::{
         CoreRead,
         ValidType,
     },
-    FontError,
+    ParseError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -42,12 +42,12 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     _allocator: A,
     _prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<Type<A>, FontError<R::IoError>> {
+) -> Result<Type<A>, ParseError<R::IoError>> {
     let major_version: u16 = reader.read_int()?;
     let minor_version: u16 = reader.read_int()?;
 
     if major_version != 1 && minor_version != 0 {
-        return Err(FontError::InvalidVersion {
+        return Err(ParseError::InvalidVersion {
             location: "head",
             version:  (u32::from(major_version) << u16::BITS) | u32::from(minor_version),
         });
@@ -56,7 +56,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     let mut font_revision = [0u8; 4];
     let read = reader.read(&mut font_revision)?;
     if read != font_revision.len() {
-        return Err(FontError::UnexpectedEop {
+        return Err(ParseError::UnexpectedEop {
             location: "head::fontRevision",
             needed:   font_revision.len() - read,
         });
@@ -68,7 +68,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
     let magic: u32 = reader.read_int()?;
     if magic != 0x5f0f_3cf5_u32 {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "head::magic",
             expected: ValidType::U32(0x5f0f_3cf5_u32),
             parsed:   ValidType::U32(magic),
@@ -80,7 +80,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
     let units_per_em: u16 = reader.read_int()?;
     if !(16..=16384).contains(&units_per_em) {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "head::unitsPerEm",
             expected: ValidType::U16(if units_per_em < 16 { 16 } else { 16384 }),
             parsed:   ValidType::U16(units_per_em),
@@ -113,7 +113,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
     let long_offset: u16 = reader.read_int()?;
     if long_offset > 1 {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "head::indexToLocFormat",
             expected: ValidType::U16(1),
             parsed:   ValidType::U16(long_offset),
@@ -122,7 +122,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
 
     let glyf_format: u16 = reader.read_int()?;
     if glyf_format != 0 {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "head::glyphDataFormat",
             expected: ValidType::U16(0),
             parsed:   ValidType::U16(glyf_format),

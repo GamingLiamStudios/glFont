@@ -74,7 +74,7 @@ impl core::fmt::Display for ValidType {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error<IoError: core::fmt::Debug> {
+pub enum ParseError<IoError: core::fmt::Debug> {
     #[error(transparent)]
     Io(#[from] CoreReadError<IoError>),
 

@@ -3,6 +3,7 @@
 
 use crate::{
     tables::{
+        glyf::Glyph,
         name::RecordType,
         parse_table,
         Table,
@@ -15,7 +16,7 @@ use crate::{
         SlotmapKey,
         ValidType,
     },
-    FontError,
+    ParseError,
 };
 
 // A: core::alloc::Allocator + core::fmt::Debug + 'static
@@ -26,19 +27,24 @@ pub struct Collection<A: core::alloc::Allocator + core::fmt::Debug + 'static = a
     loaded: Slotmap<Font<A>, A>,
 }
 
-pub trait Trait {
+pub trait Trait<A: core::alloc::Allocator> {
     fn name_record(
         &self,
         record_type: RecordType,
     ) -> Option<&str>;
     fn id(&self) -> Option<&str>;
+    fn glyph(
+        &self,
+        glyph_id: u32,
+    ) -> Option<&Glyph<A>>;
+    fn units_per_em(&self) -> u16;
 }
 
-fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, FontError<R::IoError>> {
+fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, ParseError<R::IoError>> {
     let mut version = [0; 4];
     input.read(&mut version)?;
     if version != [0x00, 0x01, 0x00, 0x00] {
-        return Err(FontError::InvalidSfntVersion(version));
+        return Err(ParseError::InvalidSfntVersion(version));
     }
 
     let num_tables: u16 = input.read_int()?;
@@ -46,7 +52,7 @@ fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, FontError<R::IoError
 
     let search_range: u16 = input.read_int()?;
     if search_range != 2_u16.pow(num_tables.ilog2()) * 16 {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "SearchRange",
             expected: ValidType::U16(2_u16.pow(num_tables.ilog2()) * 16),
             parsed:   ValidType::U16(search_range),
@@ -55,7 +61,7 @@ fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, FontError<R::IoError
 
     let entry_selector: u16 = input.read_int()?;
     if entry_selector != u16::try_from(num_tables.ilog2()).expect("ilog2 downcast failed") {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "EntrySelector",
             expected: ValidType::U32(num_tables.ilog2()),
             parsed:   ValidType::U16(entry_selector),
@@ -64,7 +70,7 @@ fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, FontError<R::IoError
 
     let range_shift: u16 = input.read_int()?;
     if range_shift != num_tables * 16 - search_range {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "RangeShift",
             expected: ValidType::U16(num_tables * 16 - search_range),
             parsed:   ValidType::U16(range_shift),
@@ -81,7 +87,7 @@ fn verify_header<R: CoreRead>(input: &mut R) -> Result<u16, FontError<R::IoError
 pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, R: CoreRead>(
     allocator: A,
     input: &mut R,
-) -> Result<Font<A>, FontError<R::IoError>> {
+) -> Result<Font<A>, ParseError<R::IoError>> {
     let mut reader = ChecksumReader::new(input);
 
     let num_tables = verify_header(&mut reader)?;
@@ -91,7 +97,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
         let mut tag = [0u8; 4];
         let read = reader.read(&mut tag)?;
         if read != tag.len() {
-            return Err(FontError::UnexpectedEop {
+            return Err(ParseError::UnexpectedEop {
                 location: "TableRecord",
                 needed:   tag.len() - read,
             });
@@ -152,7 +158,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
             parsed_tables.push(parsed?);
         } else {
             let error = parsed.expect_err("is_not_ok");
-            if !matches!(error, FontError::InvalidTag(_)) {
+            if !matches!(error, ParseError::InvalidTag(_)) {
                 return Err(error);
             };
         }
@@ -181,7 +187,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
     // ChecksumAdjustment may be set to 0 for version 'OTTO'
     (checksum, _) = 0xb1b0_afba_u32.overflowing_sub(checksum);
     if checksum != checksum_adj {
-        return Err(FontError::Parsing {
+        return Err(ParseError::Parsing {
             variable: "ChecksumAdjustment",
             expected: ValidType::U32(checksum_adj),
             parsed:   ValidType::U32(checksum),
@@ -191,7 +197,7 @@ pub fn open_font<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static, 
     Ok(parsed_tables)
 }
 
-impl<A: core::alloc::Allocator + core::fmt::Debug + 'static> Trait for Font<A> {
+impl<A: core::alloc::Allocator + core::fmt::Debug + 'static> Trait<A> for Font<A> {
     fn name_record(
         &self,
         record_type: RecordType,
@@ -211,6 +217,27 @@ impl<A: core::alloc::Allocator + core::fmt::Debug + 'static> Trait for Font<A> {
     fn id(&self) -> Option<&str> {
         self.name_record(RecordType::UniqueIdentifier)
     }
+
+    fn glyph(
+        &self,
+        glyph_id: u32,
+    ) -> Option<&Glyph<A>> {
+        let Some(Table::Glyf(glyf_table)) = self.iter().find(|t| matches!(t, Table::Glyf(_)))
+        else {
+            return None;
+        };
+
+        glyf_table.get(glyph_id as usize)
+    }
+
+    fn units_per_em(&self) -> u16 {
+        let Some(Table::Head(head_table)) = self.iter().find(|t| matches!(t, Table::Head(_)))
+        else {
+            panic!("No Head");
+        };
+
+        head_table.units_per_em
+    }
 }
 
 impl<A: core::alloc::Allocator + core::fmt::Debug + 'static> Collection<A> {
@@ -227,6 +254,8 @@ impl<A: core::alloc::Allocator + core::fmt::Debug + 'static> Collection<A> {
         self.loaded.push(font)
     }
 
+    /// # Panics
+    /// - If `key` does not exist in collection
     pub fn get(
         &self,
         key: SlotmapKey,

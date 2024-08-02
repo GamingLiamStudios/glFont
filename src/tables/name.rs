@@ -12,7 +12,7 @@ use crate::{
         CoreVec,
         TrackingReader,
     },
-    FontError,
+    ParseError,
 };
 
 pub type ParsedType<A> = Type<A>;
@@ -97,13 +97,13 @@ impl<A: core::alloc::Allocator + Copy> Record<A> {
         allocator: A,
         bytes: &mut [u8],
     ) -> CoreBox<str, A> {
-        let nibbles: &mut [u16] =
-            bytemuck::try_cast_slice_mut(bytes).expect("Invalid input to `Record::from_bytes`");
-        if cfg!(target_endian = "little") {
-            for v in nibbles.iter_mut() {
-                *v = v.swap_bytes();
+        let nibbles = unsafe {
+            let mut arr = CoreBox::new_uninit_slice_in(bytes.len(), allocator);
+            for (v, s) in bytes.array_chunks().zip(&mut arr) {
+                s.write(u16::from_be_bytes(*v));
             }
-        }
+            arr.assume_init()
+        };
 
         // Feel like this can be done slightly more clean
         let char_iter = char::decode_utf16(nibbles.iter().copied())
@@ -126,6 +126,25 @@ impl<A: core::alloc::Allocator + Copy> Record<A> {
         }
     }
 
+    fn from_utf8(
+        allocator: A,
+        bytes: &mut [u8],
+    ) -> CoreBox<str, A> {
+        let utf8_slices = unsafe {
+            let mut arr = CoreBox::new_uninit_slice_in(bytes.len(), allocator);
+            for (v, s) in bytes.iter().zip(&mut arr) {
+                s.write(v);
+            }
+            arr.assume_init()
+        };
+
+        // literally just from_boxed_utf8_unchecked
+        unsafe {
+            let (ptr, alloc) = CoreBox::into_raw_with_allocator(utf8_slices); // should just be `allocator`
+            CoreBox::from_raw_in(ptr as *mut str, alloc)
+        }
+    }
+
     pub fn from_bytes(
         allocator: A,
         platform_id: u16,
@@ -140,7 +159,8 @@ impl<A: core::alloc::Allocator + Copy> Record<A> {
                 // Unicode
                 // TODO: Verify BMP types
                 (0, 3..4, _) | (3, 1 | 10, _) => Self::from_utf16(allocator, bytes),
-                (..) => panic!("Unrecognised record!"),
+                (1, 0, _) => Self::from_utf8(allocator, bytes),
+                (a, b, c) => panic!("Unrecognised record! {a} {b} {c} {bytes:?}"),
             },
         }
     }
@@ -156,7 +176,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
     allocator: A,
     _prev_tables: &[Table<A>],
     reader_actual: &mut R,
-) -> Result<Type<A>, FontError<R::IoError>> {
+) -> Result<Type<A>, ParseError<R::IoError>> {
     let mut reader = TrackingReader::new(reader_actual);
 
     let version: u16 = reader.read_int()?;
@@ -209,7 +229,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug, R: CoreR
         unsafe { CoreBox::new_uninit_slice_in(storage_area_length, allocator).assume_init() };
     let read = reader_actual.read(&mut storage_area)?;
     if read < storage_area_length {
-        return Err(FontError::UnexpectedEop {
+        return Err(ParseError::UnexpectedEop {
             location: "name::storage_area",
             needed:   storage_area_length - read,
         });

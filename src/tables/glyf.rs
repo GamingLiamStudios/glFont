@@ -8,7 +8,7 @@ use crate::{
         CoreVec,
         TrackingReader,
     },
-    FontError,
+    ParseError,
 };
 
 pub type ParsedType<A> = CoreVec<Glyph<A>, A>;
@@ -26,15 +26,15 @@ impl Flags {
 
 #[derive(Debug, Clone)]
 pub struct Glyph<A: core::alloc::Allocator> {
-    num_contours: i16,
+    pub num_contours: i16,
 
-    x_bounds: core::range::RangeInclusive<i16>,
-    y_bounds: core::range::RangeInclusive<i16>,
+    pub x_bounds: core::range::RangeInclusive<i16>,
+    pub y_bounds: core::range::RangeInclusive<i16>,
 
     // Simple Glyph
-    end_pts: CoreVec<u16, A>,
+    pub end_pts: CoreVec<u16, A>,
     // (x, y, on_curve)
-    points:  CoreVec<(i16, i16, bool), A>,
+    pub points:  CoreVec<(i16, i16, bool), A>,
     // instructions: io::CoreVec<u8, A>, // TODO: Parse bytecodes
 }
 
@@ -51,7 +51,7 @@ macro_rules! read_coords {
                         (true, false) => -i16::from($reader.read_int::<u8>()?),
                         (true, true) => i16::from($reader.read_int::<u8>()?),
                         (false, false) => $reader.read_int::<i16>()?,
-                        (false, true) => *vec.last().unwrap_or(&0i16),
+                        (false, true) => 0i16,
                     },
                 );
             }
@@ -66,10 +66,10 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static
     allocator: A,
     prev_tables: &[Table<A>],
     reader: &mut R,
-) -> Result<ParsedType<A>, FontError<R::IoError>> {
+) -> Result<ParsedType<A>, ParseError<R::IoError>> {
     // Requires `maxp` + `loca` tables
     let Some(Table::Loca(loca)) = prev_tables.iter().find(|v| matches!(v, Table::Loca(_))) else {
-        return Err(FontError::MissingTable {
+        return Err(ParseError::MissingTable {
             missing: "loca",
             parsing: "glyf",
         });
@@ -103,7 +103,7 @@ pub fn parse_table<A: core::alloc::Allocator + Copy + core::fmt::Debug + 'static
         }
         let _ = reader.skip(loca.index(idx).0 as usize - reader.total_read())?;
         if reader.total_read() != loca.index(idx).0 as usize {
-            return Err(FontError::UnexpectedEop {
+            return Err(ParseError::UnexpectedEop {
                 location: "glyf",
                 needed:   loca.index(idx).0 as usize - reader.total_read(),
             });

@@ -5,11 +5,14 @@
 #![feature(generic_const_exprs)] // CoreRead::read_int
 #![feature(new_range_api)] // glyf
 #![feature(new_uninit)] // name
+#![feature(array_chunks)] // name
+#![feature(array_windows)] // render
 #![allow(incomplete_features)]
 
 extern crate alloc;
 
 mod font;
+pub mod render;
 mod tables;
 mod types;
 
@@ -19,5 +22,11 @@ pub use font::{
     Font,
     Trait as FontTrait,
 };
+pub use render::{
+    to_buf as render_to_buf,
+    Error as RenderError,
+    FormattedText,
+    SubPixelAlignment,
+};
 pub use tables::name::RecordType as NameRecord;
-pub use types::Error as FontError;
+pub use types::ParseError;
